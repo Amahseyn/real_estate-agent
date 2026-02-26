@@ -1,3 +1,6 @@
-openai
-pytest
-streamlit
+streamlit==1.28.0
+openai==0.28.0  # Older version that doesn't have the proxies issue
+chromadb==0.4.18
+pandas==2.1.0
+python-dotenv==1.0.0
+numpy==1.24.0

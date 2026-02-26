@@ -1,4 +1,7 @@
 data/
+.vscode/
+real_estate_chroma_db/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

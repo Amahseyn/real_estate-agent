@@ -1,1079 +1,625 @@
-# app.py
-import streamlit as st
-import openai
-from dotenv import load_dotenv
 import os
-import chromadb
-from chromadb.config import Settings
-import re
+import json
+import faiss
+import pickle
+import numpy as np
+import pandas as pd
+from dotenv import load_dotenv
+from openai import OpenAI, APIStatusError
+import streamlit as st
 
-# Disable ChromaDB telemetry
-os.environ['ANONYMIZED_TELEMETRY'] = 'False'
-
-# Load environment variables
+# ============================================
+# ⚙️ Configuration & CSS
+# ============================================
 load_dotenv()
 
-# Page configuration
 st.set_page_config(
-    page_title="Real Estate AI Assistant",
+    page_title="Professional Real Estate AI",
     page_icon="🏠",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# ============================================
-# CSS
-# ============================================
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-    .stApp {
-        font-family: 'Inter', sans-serif;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-
-    .stChatMessage {
-        padding: 20px;
-        border-radius: 15px;
-        margin-bottom: 15px;
-        animation: fadeIn 0.5s ease-in-out;
-        border: 1px solid rgba(0, 0, 0, 0.05);
-    }
-
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-
-    [data-testid="chat-message-user"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-    }
-
-    [data-testid="chat-message-assistant"] {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        border: 1px solid #e0e0e0;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-    }
-
-    .property-card {
-        background: white;
-        border: none;
-        border-radius: 20px;
-        padding: 20px;
-        margin: 15px 0;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-        transition: all 0.3s ease;
-        position: relative;
-        overflow: hidden;
-    }
-
-    .property-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: linear-gradient(90deg, #667eea, #764ba2, #667eea);
-        background-size: 200% 100%;
-        animation: gradientMove 3s ease infinite;
-    }
-
-    @keyframes gradientMove {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-
-    .property-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
-    }
-
-    .property-price {
-        font-size: 28px;
+    .main-header {
+        font-size: 2.2rem;
         font-weight: 700;
-        margin-bottom: 10px;
-        background: linear-gradient(135deg, #667eea, #764ba2);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        color: transparent;
-        display: inline-block;
-    }
-
-    .property-detail {
-        color: #4a5568;
-        font-size: 16px;
-        line-height: 1.6;
-    }
-
-    .property-badge {
-        display: inline-block;
-        padding: 5px 12px;
-        border-radius: 20px;
-        font-size: 12px;
-        font-weight: 600;
-        margin-right: 8px;
-        margin-bottom: 8px;
-    }
-
-    .badge-bed {
-        background: linear-gradient(135deg, rgba(102, 126, 234, 0.12), rgba(118, 75, 162, 0.12));
-        color: #667eea;
-        border: 1px solid rgba(102, 126, 234, 0.25);
-    }
-
-    .badge-bath {
-        background: linear-gradient(135deg, rgba(72, 187, 120, 0.12), rgba(56, 161, 105, 0.12));
-        color: #38a169;
-        border: 1px solid rgba(72, 187, 120, 0.25);
-    }
-
-    .badge-size {
-        background: linear-gradient(135deg, rgba(246, 173, 85, 0.12), rgba(237, 137, 54, 0.12));
-        color: #ed8936;
-        border: 1px solid rgba(246, 173, 85, 0.25);
-    }
-
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #f7fafc 0%, #edf2f7 100%);
-        padding: 2rem 1rem;
-    }
-
-    .sidebar-header {
-        font-size: 24px;
-        font-weight: 700;
-        color: #2d3748;
-        margin-bottom: 20px;
-        padding-bottom: 10px;
-        border-bottom: 2px solid #667eea;
-    }
-
-    .stButton button {
-        border-radius: 10px;
-        border: none;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        font-weight: 600;
-        padding: 10px 20px;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
-        width: 100%;
-    }
-
-    .stButton button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.3);
-    }
-
-    .stTextInput input {
-        border-radius: 10px;
-        border: 2px solid #e2e8f0;
-        padding: 10px 15px;
-        font-size: 16px;
-        transition: all 0.3s ease;
-    }
-
-    .stTextInput input:focus {
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-
-    .metric-card {
-        background: white;
-        border-radius: 15px;
-        padding: 20px;
+        color: #1E3A5F;
         text-align: center;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-        transition: all 0.3s ease;
-        margin-bottom: 10px;
+        margin-bottom: 1rem;
     }
-
-    .metric-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+    .property-card {
+        background: #ffffff;
+        border: 1px solid #e0e6ed;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
     }
-
-    .metric-value {
-        font-size: 32px;
+    .price-tag {
+        font-size: 1.5rem;
         font-weight: 700;
-        color: #667eea;
-        margin-bottom: 5px;
+        color: #2ecc71;
     }
-
-    .metric-label {
-        font-size: 14px;
-        color: #718096;
-        font-weight: 500;
-    }
-
-    .status-badge {
-        display: inline-block;
-        padding: 5px 12px;
-        border-radius: 20px;
-        font-size: 12px;
+    .intent-badge {
+        padding: 4px 12px;
+        border-radius: 15px;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
+        margin-bottom: 10px;
+        display: inline-block;
     }
-
-    .status-for-sale {
-        background: linear-gradient(135deg, rgba(72, 187, 120, 0.12), rgba(56, 161, 105, 0.12));
-        color: #38a169;
-        border: 1px solid rgba(72, 187, 120, 0.25);
-    }
-
-    .status-pending {
-        background: linear-gradient(135deg, rgba(236, 201, 75, 0.12), rgba(214, 158, 46, 0.12));
-        color: #d69e2e;
-        border: 1px solid rgba(236, 201, 75, 0.25);
-    }
-
-    .status-sold {
-        background: linear-gradient(135deg, rgba(245, 101, 101, 0.12), rgba(197, 48, 48, 0.12));
-        color: #c53030;
-        border: 1px solid rgba(245, 101, 101, 0.25);
-    }
-
-    .custom-divider {
-        height: 2px;
-        background: linear-gradient(90deg, transparent, #667eea, transparent);
-        margin: 30px 0;
-    }
-
-    .gradient-text {
-        background: linear-gradient(135deg, #667eea, #764ba2);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        color: transparent;
-        font-weight: 700;
-    }
-
-    .success-box {
-        background: linear-gradient(135deg, rgba(72, 187, 120, 0.12), rgba(56, 161, 105, 0.12));
-        border-left: 4px solid #38a169;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-        color: #2d3748;
-    }
-
+    .badge-search   { background: #e1f5fe; color: #0288d1; }
+    .badge-chat     { background: #f3e5f5; color: #7b1fa2; }
+    .badge-offtopic { background: #fce4ec; color: #c62828; }
+    .badge-sort     { background: #e8f5e9; color: #2e7d32; }
     .warning-box {
-        background: linear-gradient(135deg, rgba(236, 201, 75, 0.12), rgba(214, 158, 46, 0.12));
-        border-left: 4px solid #d69e2e;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-        color: #2d3748;
-    }
-
-    .info-box {
-        background: linear-gradient(135deg, rgba(66, 153, 225, 0.12), rgba(49, 130, 206, 0.12));
-        border-left: 4px solid #3182ce;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-        color: #2d3748;
-    }
-
-    @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.05); }
-        100% { transform: scale(1); }
-    }
-
-    .pulse { animation: pulse 2s infinite; }
-
-    ::-webkit-scrollbar { width: 8px; height: 8px; }
-    ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
-    ::-webkit-scrollbar-thumb {
-        background: linear-gradient(135deg, #667eea, #764ba2);
-        border-radius: 10px;
-    }
-
-    @media (max-width: 768px) {
-        .property-card { margin: 10px 0; }
-        .property-price { font-size: 22px; }
-        .metric-value { font-size: 24px; }
+        background: #fff8e1;
+        border-left: 4px solid #f9a825;
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin-bottom: 10px;
+        font-size: 0.9rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ============================================
-# DATABASE
+# 🤖 AI Client
 # ============================================
 @st.cache_resource
-def init_chroma_db():
+def get_ai_client(api_key: str) -> OpenAI:
+    return OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key
+    )
+
+
+def clean_json_response(content: str) -> dict:
+    """Strip markdown fences and parse JSON safely."""
+    content = content.strip()
+    if content.startswith("```json"):
+        content = content[7:]
+    if content.startswith("```"):
+        content = content[3:]
+    if content.endswith("```"):
+        content = content[:-3]
+    return json.loads(content.strip())
+
+
+# ============================================
+# 🔍 Search & Data Logic
+# ============================================
+@st.cache_resource
+def load_assets(path: str = "./real_estate_faiss_index"):
+    """Load FAISS index, metadata CSV, and config pickle."""
     try:
-        settings = Settings(anonymized_telemetry=False, allow_reset=True)
-        client = chromadb.PersistentClient(
-            path="./real_estate_chroma_db",
-            settings=settings
-        )
+        index    = faiss.read_index(os.path.join(path, "faiss_index.bin"))
+        metadata = pd.read_csv(os.path.join(path, "metadata.csv"))
+        with open(os.path.join(path, "config.pkl"), "rb") as f:
+            config = pickle.load(f)
+
+        # Read the true dimension directly from the loaded FAISS index
+        actual_dim = index.d
+        return index, metadata, config, actual_dim
+
+    except Exception as e:
+        st.error(f"Failed to load assets: {e}")
+        return None, None, None, 1536
+
+
+def dim_to_model(dim: int) -> str:
+    """
+    Return the OpenAI embedding model whose default output
+    matches the FAISS index dimension.
+    """
+    mapping = {
+        1536: "text-embedding-3-small",
+        3072: "text-embedding-3-large",
+         256: "text-embedding-3-small",
+         512: "text-embedding-3-small",
+    }
+    return mapping.get(dim, "text-embedding-3-large")
+
+
+class HybridSearcher:
+    def __init__(
+        self,
+        client:   OpenAI,
+        index,
+        metadata: pd.DataFrame,
+        dim:      int,
+    ):
+        self.client   = client
+        self.index    = index
+        self.metadata = metadata
+        self.dim      = dim
+        self.model    = dim_to_model(dim)
+
+    def get_embedding(self, text: str) -> np.ndarray:
+        """
+        Fetch embedding and guarantee the vector length equals self.dim.
+          A) exact match  → use as-is
+          B) too long     → truncate
+          C) too short    → zero-pad
+        """
         try:
-            return client.get_collection("real_estate_properties")
-        except Exception:
-            return None
-    except Exception as e:
-        st.error(f"❌ Failed to initialize Chroma DB: {str(e)}")
-        return None
+            kwargs = dict(model=self.model, input=text)
+            if self.model.startswith("text-embedding-3"):
+                kwargs["dimensions"] = self.dim
+
+            resp = self.client.embeddings.create(**kwargs)
+            vec  = np.array(resp.data[0].embedding, dtype="float32")
+
+        except Exception as e:
+            st.warning(f"Embedding error: {e}. Using zero vector.")
+            return np.zeros(self.dim, dtype="float32")
+
+        # Dimension safety net
+        if vec.shape[0] == self.dim:
+            return vec
+        elif vec.shape[0] > self.dim:
+            return vec[: self.dim]
+        else:
+            pad = np.zeros(self.dim, dtype="float32")
+            pad[: vec.shape[0]] = vec
+            return pad
+
+    def _apply_filters(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        """Apply all structured filters from params to dataframe."""
+        if params.get("max_price"):
+            df = df[df["price"] <= params["max_price"]]
+        if params.get("min_price"):
+            df = df[df["price"] >= params["min_price"]]
+        if params.get("min_beds"):
+            df = df[df["bed"] >= params["min_beds"]]
+        if params.get("max_beds"):
+            df = df[df["bed"] <= params["max_beds"]]
+        if params.get("location"):
+            df = df[
+                df["city"].str.contains(
+                    params["location"], case=False, na=False
+                )
+            ]
+        return df
+
+    def sort_search(self, params: dict, sort_by: str,
+                    ascending: bool, top_k: int = 5):
+        """
+        Pure DataFrame sort — no FAISS involved.
+        Used for queries like 'highest price', 'cheapest home', etc.
+        Returns (results_list, warnings_list).
+        """
+        df = self._apply_filters(self.metadata.copy(), params)
+
+        if df.empty:
+            return [], ["No properties match those filters."]
+
+        # Map sort_by alias → actual column name
+        col_map = {
+            "price": "price",
+            "beds":  "bed",
+            "baths": "bath",
+        }
+        col = col_map.get(sort_by, "price")
+
+        if col not in df.columns:
+            return [], [f"Column '{col}' not found in dataset."]
+
+        df_sorted = df.sort_values(col, ascending=ascending)
+        results   = df_sorted.head(top_k).to_dict(orient="records")
+        return results, []
+
+    def semantic_search(self, query: str, params: dict, top_k: int = 5):
+        """
+        FAISS semantic search over filtered subset.
+        Returns (results_list, warnings_list).
+        """
+        df = self._apply_filters(self.metadata.copy(), params)
+
+        if df.empty:
+            return [], ["No properties match those specific filters."]
+
+        xq = self.get_embedding(query).reshape(1, -1)
+
+        k = min(top_k * 6, self.index.ntotal)
+        if k == 0:
+            return [], ["The search index is empty."]
+
+        _, indices = self.index.search(xq, k)
+
+        filtered_idx  = set(df.index.tolist())
+        final_results = []
+        for idx in indices[0]:
+            if idx != -1 and idx in filtered_idx:
+                final_results.append(df.loc[idx].to_dict())
+            if len(final_results) >= top_k:
+                break
+
+        if not final_results:
+            return [], ["Semantic search found no results in the filtered set."]
+
+        return final_results, []
 
 
 # ============================================
-# OPENROUTER / AI
+# 🧠 Real Estate Agent
 # ============================================
-def init_openrouter(api_key):
-    try:
-        openai.api_base = "https://openrouter.ai/api/v1"
-        openai.api_key = api_key
-        return True
-    except Exception as e:
-        st.error(f"❌ Failed to initialize OpenRouter: {str(e)}")
-        return False
+
+_OFF_TOPIC_EXAMPLES = (
+    "sports, weather, cooking recipes, medical advice, coding help, "
+    "politics, entertainment, travel directions, general trivia"
+)
+
+_CLASSIFY_SYSTEM = f"""
+You are a classifier for a real estate assistant application.
+Your ONLY job is to analyse the user's latest message and return a JSON object.
+
+Rules:
+1. "is_real_estate": true  → the message is about buying, renting, selling,
+   investing in property, neighbourhoods, mortgages, or home features.
+2. "is_real_estate": false → the message is about anything else
+   (e.g. {_OFF_TOPIC_EXAMPLES}).
+
+3. "intent" values:
+   - "sort"         → user wants listings sorted/ranked by a field.
+                      e.g. "highest price", "cheapest", "most bedrooms",
+                           "lowest price", "most expensive", "fewest baths"
+   - "search"       → user wants property listings by description/location.
+   - "conversation" → user asks a real-estate question but NOT for listings.
+   - "off_topic"    → not real-estate related at all.
+
+4. "sort_by"   → "price" | "beds" | "baths"  (only when intent = "sort")
+5. "ascending" → true = lowest first, false = highest first
+                 (only when intent = "sort")
+6. Extract numeric/string filters ONLY when clearly stated.
+
+Return ONLY valid JSON, no prose:
+{{
+  "intent":        "sort" | "search" | "conversation" | "off_topic",
+  "is_real_estate": bool,
+  "sort_by":       "price" | "beds" | "baths" | null,
+  "ascending":     true | false | null,
+  "params": {{
+    "max_price": int | null,
+    "min_price": int | null,
+    "min_beds":  int | null,
+    "max_beds":  int | null,
+    "location":  str | null
+  }}
+}}
+
+Examples:
+- "show me the highest price"      → intent=sort, sort_by=price, ascending=false
+- "cheapest homes"                 → intent=sort, sort_by=price, ascending=true
+- "most bedrooms"                  → intent=sort, sort_by=beds,  ascending=false
+- "homes in Ponce under 150000"    → intent=search, params.location=Ponce, params.max_price=150000
+- "what is a cap rate?"            → intent=conversation
+- "who won the game last night?"   → intent=off_topic, is_real_estate=false
+"""
+
+_RESPONSE_SYSTEM = """
+You are a professional real estate consultant with deep market knowledge.
+
+Guidelines:
+- Answer ONLY real-estate-related questions.
+- If property listings are provided, reference specific details
+  (price, beds, city) and summarise clearly.
+- For sorted results, explicitly state the sort order used
+  (e.g. "Here are the most expensive properties…").
+- If no listings match, say so and suggest broadening the search.
+- Be concise, warm, and helpful.
+- Do NOT answer questions unrelated to real estate; politely redirect instead.
+"""
+
+_OFF_TOPIC_REPLY = (
+    "I'm your dedicated **real estate assistant** 🏠 and I'm only able to help "
+    "with property searches, market questions, mortgages, and related topics.\n\n"
+    "Could I help you find a home, explore a neighbourhood, or answer a "
+    "real-estate question instead?"
+)
 
 
-def get_api_key():
-    api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("API_KEY")
-    if not api_key and "api_key" in st.session_state:
-        api_key = st.session_state.api_key
-    return api_key
+class RealEstateAgent:
+    def __init__(self, client: OpenAI):
+        self.client      = client
+        self.model_fast  = "openai/gpt-4o-mini"
+        self.model_smart = "openai/gpt-4o"
 
+    # ------------------------------------------------------------------
+    # Step 1 – Classify & extract parameters
+    # ------------------------------------------------------------------
+    def classify_and_extract(self, query: str) -> dict:
+        """
+        Returns dict with keys:
+          intent, is_real_estate, sort_by, ascending, params.
+        Falls back to off_topic on any failure.
+        """
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.model_fast,
+                messages=[
+                    {"role": "system", "content": _CLASSIFY_SYSTEM},
+                    {"role": "user",   "content": query},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=250,
+                temperature=0,
+            )
+            data = clean_json_response(resp.choices[0].message.content)
 
-def call_ai(model, messages, max_tokens=300):
-    try:
-        response = openai.ChatCompletion.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=0.7,
-            headers={
-                "HTTP-Referer": "http://localhost:8501",
-                "X-Title": "Real Estate AI Assistant"
+            # Guarantee all keys exist
+            data.setdefault("intent",         "off_topic")
+            data.setdefault("is_real_estate",  False)
+            data.setdefault("sort_by",         None)
+            data.setdefault("ascending",       None)
+            data.setdefault("params",          {})
+
+            # Safety: if not real estate, force off_topic
+            if not data["is_real_estate"]:
+                data["intent"] = "off_topic"
+
+            return data
+
+        except Exception as exc:
+            st.warning(f"Classification error: {exc}")
+            return {
+                "intent":         "off_topic",
+                "is_real_estate": False,
+                "sort_by":        None,
+                "ascending":      None,
+                "params":         {},
             }
+
+    # ------------------------------------------------------------------
+    # Step 2 – Generate a grounded response
+    # ------------------------------------------------------------------
+    def generate_response(
+        self,
+        query:              str,
+        context_properties: list,
+        history:            list,
+        intent:             str = "search",
+        sort_by:            str = None,
+        ascending:          bool = None,
+    ) -> str:
+        """
+        Build a contextual response using the smart model.
+        """
+        if context_properties:
+            prop_lines = "\n".join([
+                f"- ${p.get('price', 0):,} | "
+                f"{p.get('bed', '?')} bed / {p.get('bath', '?')} bath | "
+                f"{p.get('city', 'Unknown')}"
+                for p in context_properties
+            ])
+
+            # Give the model a clear hint about sort context
+            if intent == "sort" and sort_by:
+                direction  = "lowest → highest" if ascending else "highest → lowest"
+                sort_label = f"sorted by {sort_by} ({direction})"
+                prop_context = (
+                    f"Properties {sort_label}:\n{prop_lines}\n\n"
+                    f"Please summarise these results clearly, "
+                    f"mentioning the sort order."
+                )
+            else:
+                prop_context = f"Relevant listings:\n{prop_lines}"
+        else:
+            prop_context = (
+                "No specific listings were retrieved for this query. "
+                "Answer based on general real estate knowledge."
+            )
+
+        messages = (
+            [{"role": "system", "content": _RESPONSE_SYSTEM}]
+            + history
+            + [{"role": "user", "content": f"{query}\n\n{prop_context}"}]
         )
-        return response.choices[0].message.content
-    except Exception:
-        return None
+
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.model_smart,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=450,
+            )
+            return resp.choices[0].message.content
+
+        except APIStatusError as e:
+            if e.status_code == 402:
+                return (
+                    "💡 **API Notice**: Your OpenRouter account needs a credit "
+                    "top-up. "
+                    "[Refill here](https://openrouter.ai/settings/credits)."
+                )
+            return f"⚠️ API error ({e.status_code}). Please try again shortly."
+
+        except Exception:
+            return "⚠️ An unexpected error occurred. Please try again."
 
 
 # ============================================
-# INTENT DETECTION
+# 🖥️ UI Helpers
 # ============================================
-def is_property_search(user_input):
-    """
-    Returns True ONLY if the user is clearly asking about properties.
-    Returns False for greetings, casual chat, or vague messages.
-    """
-    text = user_input.lower().strip()
-
-    # Short messages without property keywords = not a search
-    if len(text.split()) <= 2:
-        property_short = [
-            'house', 'home', 'property', 'properties', 'apartment',
-            'condo', 'villa', 'mansion', 'listing', 'listings'
-        ]
-        if not any(kw in text for kw in property_short):
-            return False
-
-    # Explicit greetings
-    greeting_patterns = [
-        r'^hi[\s!.,?]*$', r'^hello[\s!.,?]*$', r'^hey[\s!.,?]*$',
-        r'^hola[\s!.,?]*$', r'^howdy[\s!.,?]*$', r'^sup[\s!.,?]*$',
-        r'^yo[\s!.,?]*$', r'^good\s*(morning|afternoon|evening|night)[\s!.,?]*$',
-        r'^what\'?s\s*up[\s!.,?]*$', r'^how\s*are\s*you[\s!.,?]*',
-        r'^how\s*do\s*you\s*do', r'^thank', r'^thanks',
-        r'^bye[\s!.,?]*$', r'^goodbye', r'^see\s*you',
-        r'^ok[\s!.,?]*$', r'^okay[\s!.,?]*$', r'^yes[\s!.,?]*$',
-        r'^no[\s!.,?]*$', r'^sure[\s!.,?]*$', r'^great[\s!.,?]*$',
-        r'^cool[\s!.,?]*$', r'^awesome[\s!.,?]*$', r'^nice[\s!.,?]*$',
-        r'^who\s*are\s*you', r'^what\s*are\s*you',
-        r'^what\s*can\s*you\s*do', r'^help[\s!.,?]*$',
-        r'^tell\s*me\s*about\s*you',
-    ]
-
-    for pattern in greeting_patterns:
-        if re.search(pattern, text):
-            return False
-
-    # Property search indicators
-    property_patterns = [
-        r'\d+\s*bed', r'\d+\s*bath', r'\d+\s*room', r'\d+\s*br', r'\d+\s*bd',
-        r'bedroom', r'bathroom',
-        r'\$[\d,]+', r'under\s+\$', r'below\s+\$', r'above\s+\$',
-        r'less\s+than\s+\$', r'more\s+than\s+\$',
-        r'\bhouse\b', r'\bhome\b', r'\bhomes\b', r'\bhouses\b',
-        r'\bproperty\b', r'\bproperties\b',
-        r'\bapartment\b', r'\bcondo\b', r'\btownhouse\b', r'\bvilla\b',
-        r'\bduplex\b', r'\bmansion\b', r'\bcottage\b', r'\bbungalow\b',
-        r'for\s+sale', r'for\s+rent', r'to\s+buy',
-        r'looking\s+for', r'find\s+me', r'show\s+me', r'search\s+for',
-        r'i\s+want\s+a?\s*(house|home|property|apartment|condo)',
-        r'i\s+need\s+a?\s*(house|home|property|apartment|condo)',
-        r'sq\s*ft', r'square\s*feet', r'\bacre\b',
-        r'\bpool\b', r'\bgarage\b', r'\bgarden\b', r'\byard\b',
-        r'\bcheap\b', r'\bexpensive\b', r'\baffordable\b', r'\bluxury\b',
-        r'budget', r'price\s*range',
-        r'real\s*estate', r'\blisting\b', r'\blistings\b',
-    ]
-
-    for pattern in property_patterns:
-        if re.search(pattern, text):
-            return True
-
-    # If no property keywords found, not a search
-    return False
+def render_cards(properties: list):
+    """Display up to 6 property cards in a 3-column grid."""
+    if not properties:
+        return
+    cols = st.columns(min(len(properties), 3))
+    for i, p in enumerate(properties[:6]):
+        with cols[i % 3]:
+            st.markdown(f"""
+            <div class="property-card">
+                <div class="price-tag">${p.get('price', 0):,}</div>
+                <div style="margin:10px 0;">
+                    📍 <strong>{p.get('city', 'N/A')}</strong>
+                </div>
+                <div style="font-size:0.85rem; color:#555;">
+                    🛏️ {p.get('bed', 0)} Beds &nbsp;|&nbsp;
+                    🛁 {p.get('bath', 0)} Baths
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
-def get_greeting_response(user_input):
-    """Fallback greeting if AI call fails"""
-    text = user_input.lower().strip()
-
-    if any(w in text for w in ['thank', 'thanks']):
-        return (
-            "You're welcome! 😊 Let me know if you need help finding properties.\n\n"
-            "**Try asking:**\n"
-            "- *\"Show me houses under $300k\"*\n"
-            "- *\"Find 3 bedroom homes in Miami\"*"
-        )
-    if any(w in text for w in ['bye', 'goodbye', 'see you']):
-        return "Goodbye! 👋 Come back anytime you need help finding your dream home! 🏡"
-    if any(w in text for w in ['who are you', 'what are you', 'what can you do']):
-        return (
-            "I'm your **Real Estate AI Assistant**! 🏠\n\n"
-            "I can:\n"
-            "- 🔍 Search properties by location, price, size\n"
-            "- 🛏️ Filter by bedrooms and bathrooms\n"
-            "- 💰 Find homes in your budget\n\n"
-            "**Try:** *\"Show me 3 bedroom houses under $500k\"*"
-        )
-    return (
-        "👋 Hello! I'm your Real Estate AI Assistant!\n\n"
-        "Tell me what you're looking for and I'll find matching properties.\n\n"
-        "**Example searches:**\n"
-        "- *\"3 bedroom houses under $300k\"*\n"
-        "- *\"Homes in Miami\"*\n"
-        "- *\"Affordable 2 bed apartments\"*\n"
-        "- *\"Luxury homes with pool\"*"
+def render_intent_badge(intent: str):
+    """Render a coloured intent badge."""
+    cfg = {
+        "search":       ("badge-search",   "🔍 Property Search"),
+        "sort":         ("badge-sort",     "📊 Sorted Results"),
+        "conversation": ("badge-chat",     "💬 RE Question"),
+        "off_topic":    ("badge-offtopic", "🚫 Off-Topic"),
+    }
+    css_class, label = cfg.get(intent, ("badge-chat", "💬 Chat"))
+    st.markdown(
+        f'<span class="intent-badge {css_class}">{label}</span>',
+        unsafe_allow_html=True,
     )
 
 
 # ============================================
-# SAFE VALUE HELPERS
-# ============================================
-def safe_float(value, default=0.0):
-    try:
-        return float(value) if value is not None else default
-    except (ValueError, TypeError):
-        return default
-
-
-def safe_int(value, default=0):
-    try:
-        return int(float(value)) if value is not None else default
-    except (ValueError, TypeError):
-        return default
-
-
-def format_price(price):
-    val = safe_float(price)
-    return f"${val:,.0f}" if val > 0 else "Price N/A"
-
-
-def format_size(size):
-    val = safe_float(size)
-    return f"{val:,.0f} sq ft" if val > 0 else "N/A"
-
-
-def format_lot(lot):
-    val = safe_float(lot)
-    return f"{val:.2f} acres" if val > 0 else "N/A"
-
-
-def format_street(street):
-    """Clean up street - hide numeric-only values (MLS IDs)"""
-    if not street:
-        return "Address on request"
-    s = str(street).strip()
-    try:
-        float(s)
-        return "Address on request"
-    except ValueError:
-        pass
-    if len(s) < 3:
-        return "Address on request"
-    return s
-
-
-# ============================================
-# PROPERTY SEARCH WITH RELEVANCE FILTERING
-# ============================================
-RELEVANCE_THRESHOLD = 1.5  # ChromaDB distance threshold - lower = more relevant
-
-def search_properties(collection, query_text, min_beds=None, max_price=None):
-    """
-    Search properties. Returns ONLY relevant results by checking
-    ChromaDB distance scores against a threshold.
-    """
-    if not collection:
-        return None
-
-    where_conditions = []
-    if min_beds and min_beds > 0:
-        where_conditions.append({"bed": {"$gte": min_beds}})
-    if max_price and max_price > 0:
-        where_conditions.append({"price": {"$lte": max_price}})
-
-    where_clause = None
-    if len(where_conditions) == 1:
-        where_clause = where_conditions[0]
-    elif len(where_conditions) > 1:
-        where_clause = {"$and": where_conditions}
-
-    try:
-        results = collection.query(
-            query_texts=[query_text],
-            n_results=10,
-            where=where_clause,
-            include=["documents", "metadatas", "distances"]
-        )
-    except Exception:
-        try:
-            results = collection.query(
-                query_texts=[query_text],
-                n_results=10,
-                include=["documents", "metadatas", "distances"]
-            )
-        except Exception as e:
-            st.error(f"🔍 Search failed: {str(e)}")
-            return None
-
-    # ---- FILTER BY RELEVANCE ----
-    if not results or not results.get('distances') or not results['distances'][0]:
-        return None
-
-    filtered = {
-        'documents': [[]],
-        'metadatas': [[]],
-        'distances': [[]]
-    }
-
-    for idx, distance in enumerate(results['distances'][0]):
-        if distance <= RELEVANCE_THRESHOLD:
-            filtered['documents'][0].append(results['documents'][0][idx])
-            filtered['metadatas'][0].append(results['metadatas'][0][idx])
-            filtered['distances'][0].append(distance)
-
-    # If nothing passed the filter, return None
-    if not filtered['documents'][0]:
-        return None
-
-    return filtered
-
-
-def validate_results_match_query(results, query_text):
-    """
-    Extra validation: check if results actually relate to the query.
-    For example, if user asks for "Miami" but results are all in "Dallas",
-    that's a bad match.
-    """
-    if not results or not results.get('metadatas') or not results['metadatas'][0]:
-        return None
-
-    text = query_text.lower()
-
-    # Extract city names from query
-    query_cities = []
-    if results['metadatas'][0]:
-        all_cities = set()
-        for meta in results['metadatas'][0]:
-            c = (meta.get('city') or '').strip().lower()
-            if c and c != 'unknown':
-                all_cities.add(c)
-
-        # Check if user mentioned a specific city
-        for city in all_cities:
-            if city in text:
-                query_cities.append(city)
-
-    # If user asked for a specific city, filter to only that city
-    if query_cities:
-        filtered = {
-            'documents': [[]],
-            'metadatas': [[]],
-            'distances': [[]]
-        }
-        for idx, meta in enumerate(results['metadatas'][0]):
-            result_city = (meta.get('city') or '').strip().lower()
-            if result_city in query_cities:
-                filtered['documents'][0].append(results['documents'][0][idx])
-                filtered['metadatas'][0].append(meta)
-                filtered['distances'][0].append(results['distances'][0][idx])
-
-        if filtered['documents'][0]:
-            return filtered
-        else:
-            return None
-
-    # Extract price constraints from query
-    price_match = re.search(r'under\s+\$?([\d,]+)', text)
-    if not price_match:
-        price_match = re.search(r'below\s+\$?([\d,]+)', text)
-    if not price_match:
-        price_match = re.search(r'less\s+than\s+\$?([\d,]+)', text)
-
-    if price_match:
-        max_p = float(price_match.group(1).replace(',', ''))
-        # Handle "300k" style
-        if max_p < 1000:
-            max_p *= 1000
-
-        filtered = {
-            'documents': [[]],
-            'metadatas': [[]],
-            'distances': [[]]
-        }
-        for idx, meta in enumerate(results['metadatas'][0]):
-            p = safe_float(meta.get('price', 0))
-            if p <= max_p:
-                filtered['documents'][0].append(results['documents'][0][idx])
-                filtered['metadatas'][0].append(meta)
-                filtered['distances'][0].append(results['distances'][0][idx])
-
-        if filtered['documents'][0]:
-            return filtered
-        else:
-            return None
-
-    # Extract bedroom requirements
-    bed_match = re.search(r'(\d+)\s*(?:bed|br|bd|bedroom)', text)
-    if bed_match:
-        min_b = int(bed_match.group(1))
-        filtered = {
-            'documents': [[]],
-            'metadatas': [[]],
-            'distances': [[]]
-        }
-        for idx, meta in enumerate(results['metadatas'][0]):
-            b = safe_int(meta.get('bed', 0))
-            if b >= min_b:
-                filtered['documents'][0].append(results['documents'][0][idx])
-                filtered['metadatas'][0].append(meta)
-                filtered['distances'][0].append(results['distances'][0][idx])
-
-        if filtered['documents'][0]:
-            return filtered
-        else:
-            return None
-
-    return results
-
-
-# ============================================
-# DISPLAY
-# ============================================
-def display_metric_dashboard(collection):
-    try:
-        count = collection.count()
-        sample = collection.peek(limit=10)
-        cities = set()
-        total_price = 0
-        price_count = 0
-
-        if sample and 'metadatas' in sample:
-            for meta in sample['metadatas']:
-                c = (meta.get('city') or '').strip()
-                if c and c != 'unknown':
-                    cities.add(c)
-                p = safe_float(meta.get('price', 0))
-                if p > 0:
-                    total_price += p
-                    price_count += 1
-
-        avg_price = total_price / price_count if price_count > 0 else 0
-
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{count}</div>
-                <div class="metric-label">Properties</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with c2:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{len(cities)}+</div>
-                <div class="metric-label">Cities</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        c3, c4 = st.columns(2)
-        with c3:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value" style="font-size:20px;">{format_price(avg_price)}</div>
-                <div class="metric-label">Avg Price</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with c4:
-            st.markdown("""
-            <div class="metric-card">
-                <div class="metric-value pulse">✨</div>
-                <div class="metric-label">Live</div>
-            </div>
-            """, unsafe_allow_html=True)
-    except Exception:
-        pass
-
-
-def display_property_cards(results):
-    """Display property cards OUTSIDE chat_message"""
-    if not results or not results.get('metadatas') or not results['metadatas'][0]:
-        return 0
-
-    num = len(results['metadatas'][0])
-
-    st.markdown(f"""
-    <div style="text-align:center; margin:20px 0 10px 0;">
-        <h3 class="gradient-text">🏠 {num} {'Property' if num == 1 else 'Properties'} Found</h3>
-    </div>
-    """, unsafe_allow_html=True)
-
-    for i in range(0, num, 2):
-        cols = st.columns(2)
-        for j in range(2):
-            idx = i + j
-            if idx < num:
-                meta = results['metadatas'][0][idx]
-                with cols[j]:
-                    price = safe_float(meta.get('price', 0))
-                    beds = safe_int(meta.get('bed', 0))
-                    baths = safe_int(meta.get('bath', 0))
-                    city = meta.get('city', 'Unknown') or 'Unknown'
-                    state = meta.get('state', '') or ''
-                    house_size = safe_float(meta.get('house_size', 0))
-                    acre_lot = safe_float(meta.get('acre_lot', 0))
-                    status = meta.get('status', 'for_sale') or 'for_sale'
-                    street = format_street(meta.get('street', ''))
-
-                    if city == "unknown":
-                        city = "Unknown"
-
-                    sl = str(status).lower()
-                    if "pending" in sl:
-                        sc, sd = "status-pending", "Pending"
-                    elif "sold" in sl:
-                        sc, sd = "status-sold", "Sold"
-                    else:
-                        sc, sd = "status-for-sale", "For Sale"
-
-                    loc = f"{city}, {state}" if state else city
-
-                    st.markdown(f"""
-                    <div class="property-card">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                            <span class="property-price">{format_price(price)}</span>
-                            <span class="status-badge {sc}">{sd}</span>
-                        </div>
-                        <div style="margin-bottom:15px;">
-                            <span class="property-badge badge-bed">🛏️ {beds} Beds</span>
-                            <span class="property-badge badge-bath">🚿 {baths} Baths</span>
-                            <span class="property-badge badge-size">📐 {format_size(house_size)}</span>
-                        </div>
-                        <div class="property-detail">
-                            <p style="margin:4px 0;">📍 {loc}</p>
-                            <p style="margin:4px 0;">🌳 Lot: {format_lot(acre_lot)}</p>
-                            <p style="margin:4px 0;">📝 {street}</p>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-    return num
-
-
-def build_context(results, limit=5):
-    """Build text summary for AI"""
-    if not results or not results.get('metadatas') or not results['metadatas'][0]:
-        return ""
-    parts = []
-    for i, m in enumerate(results['metadatas'][0][:limit]):
-        city = m.get('city', 'Unknown') or 'Unknown'
-        state = m.get('state', '') or ''
-        loc = f"{city}, {state}" if state else city
-        parts.append(
-            f"#{i+1}: {format_price(m.get('price',0))} | "
-            f"{safe_int(m.get('bed',0))}bd/{safe_int(m.get('bath',0))}ba | "
-            f"{format_size(m.get('house_size',0))} | {loc}"
-        )
-    return "\n".join(parts)
-
-
-# ============================================
-# MAIN
+# 🚀 Main App
 # ============================================
 def main():
-    st.markdown("""
-    <div style="text-align:center; padding:2rem; background:white; border-radius:20px;
-                margin-bottom:2rem; box-shadow:0 10px 40px rgba(0,0,0,0.1);">
-        <h1 class="gradient-text" style="font-size:42px; margin-bottom:10px;">
-            🏠 Real Estate AI Assistant
-        </h1>
-        <p style="color:#718096; font-size:18px; margin:0;">
-            Your intelligent property search companion
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="main-header">🏠 Real Estate AI Assistant</div>',
+        unsafe_allow_html=True,
+    )
 
-    collection = init_chroma_db()
-
-    # ---- SIDEBAR ----
+    # ── Sidebar ───────────────────────────────────────────────────────
     with st.sidebar:
-        st.markdown('<div class="sidebar-header">⚙️ Settings</div>', unsafe_allow_html=True)
-
-        if collection:
-            display_metric_dashboard(collection)
-
-        st.divider()
-
-        default_key = get_api_key() or ""
+        st.title("⚙️ Control Panel")
         api_key = st.text_input(
-            "🔑 OpenRouter API Key", type="password",
-            value=default_key, placeholder="sk-or-..."
+            "OpenRouter API Key",
+            type="password",
+            value=os.getenv("API_KEY", ""),
         )
-        if api_key:
-            st.session_state.api_key = api_key
-            st.markdown('<div class="success-box" style="padding:8px;font-size:14px;">✅ API Key saved</div>',
-                        unsafe_allow_html=True)
-
-        st.divider()
-
-        model = st.selectbox("🤖 AI Model", [
-            "openai/gpt-3.5-turbo", "openai/gpt-4",
-            "anthropic/claude-3-haiku", "google/gemini-pro",
-            "meta-llama/llama-3-8b-instruct"
-        ], index=0)
-
-        st.divider()
-        st.markdown("### 🔍 Quick Filters")
-        min_beds = st.slider("Min Bedrooms", 0, 10, 0)
-        max_price = st.number_input("Max Price ($)", min_value=0, max_value=50000000, value=0, step=50000)
-
-        # Relevance slider
-        st.divider()
-        st.markdown("### 🎯 Search Precision")
-        relevance = st.slider(
-            "Relevance Threshold",
-            min_value=0.5, max_value=3.0, value=1.5, step=0.1,
-            help="Lower = stricter matching. Higher = more results but less relevant."
+        index_path = st.text_input(
+            "Data Path",
+            value="./real_estate_faiss_index",
         )
+        top_k = st.slider("Max results", min_value=1, max_value=10, value=5)
 
-        st.divider()
-        if st.button("🗑️ Clear Chat", use_container_width=True):
+        if st.button("🗑️ Clear Chat"):
             st.session_state.messages = []
             st.rerun()
 
-        st.markdown("""
-        <div class="info-box" style="margin-top:20px; font-size:14px;">
-            <strong>💡 Tips:</strong><br>
-            • Ask about specific cities<br>
-            • Mention bedroom count<br>
-            • Include price ranges<br>
-            • Describe your dream home
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("---")
+        st.caption(
+            "Ask about properties, prices, locations, or real estate topics.\n\n"
+            "**Try:** 'Show highest price' or 'Cheapest homes in Ponce'"
+        )
 
-    # ---- CHECKS ----
-    if not collection:
-        st.markdown("""
-        <div style="text-align:center; padding:40px;">
-            <div class="warning-box" style="display:inline-block; max-width:600px; padding:25px;">
-                <h3 style="margin-top:0;">⚠️ Database Not Found</h3>
-                <p>Load your data first:</p>
-                <code style="display:block;padding:12px;background:#2d3748;color:#68d391;border-radius:8px;">
-                python load_data.py --csv data/realtor-data.csv</code>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    if not api_key:
+        st.info("👈 Please enter your OpenRouter API key in the sidebar.")
         return
 
-    current_key = get_api_key()
-    if not current_key:
-        st.markdown("""
-        <div style="text-align:center; padding:40px;">
-            <div class="warning-box" style="display:inline-block; max-width:500px; padding:25px;">
-                <h3 style="margin-top:0;">🔑 API Key Required</h3>
-                <p>Enter your OpenRouter API key in the sidebar.<br>
-                Get one at <a href="https://openrouter.ai" target="_blank" style="color:#667eea;">openrouter.ai</a></p>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    # ── Load resources ────────────────────────────────────────────────
+    client                       = get_ai_client(api_key)
+    index, metadata, config, dim = load_assets(index_path)
+
+    if index is None:
         return
 
-    if not init_openrouter(current_key):
-        return
+    st.sidebar.info(f"📐 Index dimension: {dim}")
 
-    # Update global threshold from slider
-    global RELEVANCE_THRESHOLD
-    RELEVANCE_THRESHOLD = relevance
+    agent    = RealEstateAgent(client)
+    searcher = HybridSearcher(client, index, metadata, dim)
 
-    # ---- CHAT STATE ----
     if "messages" not in st.session_state:
-        st.session_state.messages = [{
-            "role": "assistant",
-            "content": (
-                "👋 Hello! I'm your Real Estate AI Assistant.\n\n"
-                "I can help you find properties. Try:\n"
-                "- *\"Show me 3 bedroom houses under $300k\"*\n"
-                "- *\"Find homes in Miami\"*\n"
-                "- *\"Affordable 2 bed apartments\"*\n\n"
-                "Use **sidebar filters** to narrow results! 🔍"
-            )
-        }]
+        st.session_state.messages = []
 
-    # ---- RENDER HISTORY ----
+    # ── Render chat history ───────────────────────────────────────────
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-        # Re-render property cards if they were part of this message
-        if msg.get("show_cards") and msg.get("results_data"):
-            display_property_cards(msg["results_data"])
+            if msg.get("props"):
+                render_cards(msg["props"])
 
-    # ---- CHAT INPUT ----
-    if prompt := st.chat_input("Ask about properties..."):
-
+    # ── Handle new input ──────────────────────────────────────────────
+    if prompt := st.chat_input(
+        "Ask me about properties, market trends, or mortgages…"
+    ):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # ======= GREETING (not a property search) =======
-        if not is_property_search(prompt):
-            ai_resp = call_ai(model, [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a friendly real estate AI assistant. "
-                        "The user is making casual conversation. "
-                        "Respond warmly in 1-2 sentences, then suggest "
-                        "2-3 example property searches they can try. "
-                        "Do NOT list or search any properties."
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking…"):
+
+                # Step 1 – Classify ───────────────────────────────────
+                analysis  = agent.classify_and_extract(prompt)
+                intent    = analysis.get("intent",    "off_topic")
+                params    = analysis.get("params",    {})
+                sort_by   = analysis.get("sort_by",   None)
+                ascending = analysis.get("ascending", False)
+
+                render_intent_badge(intent)
+
+                # Step 2 – Off-topic → instant reply ──────────────────
+                if intent == "off_topic":
+                    st.markdown(_OFF_TOPIC_REPLY)
+                    st.session_state.messages.append({
+                        "role":    "assistant",
+                        "content": _OFF_TOPIC_REPLY,
+                        "props":   None,
+                    })
+                    st.stop()
+
+                # Step 3 – Retrieve results ───────────────────────────
+                results  = []
+                warnings = []
+
+                if intent == "sort":
+                    # Pure DataFrame sort – no FAISS needed
+                    results, warnings = searcher.sort_search(
+                        params    = params,
+                        sort_by   = sort_by   or "price",
+                        ascending = ascending if ascending is not None else False,
+                        top_k     = top_k,
                     )
-                },
-                {"role": "user", "content": prompt}
-            ], max_tokens=200)
 
-            if not ai_resp:
-                ai_resp = get_greeting_response(prompt)
-
-            with st.chat_message("assistant"):
-                st.markdown(ai_resp)
-            st.session_state.messages.append({"role": "assistant", "content": ai_resp})
-            return
-
-        # ======= PROPERTY SEARCH =======
-        with st.spinner("🔍 Searching properties..."):
-            results = search_properties(
-                collection, prompt,
-                min_beds=min_beds if min_beds > 0 else None,
-                max_price=max_price if max_price > 0 else None
-            )
-
-        # Extra validation - filter out results that don't match query
-        if results:
-            results = validate_results_match_query(results, prompt)
-
-        has_results = (
-            results
-            and results.get('metadatas')
-            and results['metadatas'][0]
-            and len(results['metadatas'][0]) > 0
-        )
-
-        if has_results:
-            # Show cards
-            num_found = display_property_cards(results)
-
-            # AI summary
-            context = build_context(results)
-            ai_resp = call_ai(model, [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a friendly real estate assistant. "
-                        "Properties matching the user's search are shown above. "
-                        "Give a brief 2-3 sentence summary of what was found. "
-                        "Mention price range, locations, sizes. "
-                        "Suggest how to refine the search."
+                elif intent == "search":
+                    # Semantic FAISS search
+                    results, warnings = searcher.semantic_search(
+                        prompt, params, top_k=top_k
                     )
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"Search: '{prompt}'\n"
-                        f"Found {num_found} properties:\n{context}\n"
-                        f"Summarize briefly."
-                    )
-                }
-            ])
 
-            if not ai_resp:
-                ai_resp = (
-                    f"🏠 Found **{num_found}** matching "
-                    f"{'property' if num_found == 1 else 'properties'}! "
-                    f"Check them out above. Want to narrow it down?"
+                # Show any filter warnings
+                for w in warnings:
+                    st.markdown(
+                        f'<div class="warning-box">⚠️ {w}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                # Step 4 – Build history (exclude current user turn) ──
+                history = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages[:-1]
+                ][-6:]
+
+                # Step 5 – Generate response ──────────────────────────
+                response = agent.generate_response(
+                    query              = prompt,
+                    context_properties = results,
+                    history            = history,
+                    intent             = intent,
+                    sort_by            = sort_by,
+                    ascending          = ascending,
                 )
 
-            with st.chat_message("assistant"):
-                st.markdown(ai_resp)
+                st.markdown(response)
+                if results:
+                    render_cards(results)
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": ai_resp,
-                "show_cards": True,
-                "results_data": results
-            })
-
-        else:
-            # ======= NOTHING FOUND =======
-            ai_resp = call_ai(model, [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a helpful real estate assistant. "
-                        "No properties matched the user's search. "
-                        "Do NOT make up properties. "
-                        "Acknowledge nothing was found and suggest "
-                        "2-3 specific alternative searches. Be brief."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": f"I searched for: '{prompt}' but nothing matched."
-                }
-            ])
-
-            if not ai_resp:
-                ai_resp = (
-                    "😔 No properties matched your search.\n\n"
-                    "**Try:**\n"
-                    "- Broader terms (*\"houses\"* instead of specific features)\n"
-                    "- Higher price range or fewer bedrooms\n"
-                    "- Different city or location\n"
-                    "- Removing sidebar filters\n\n"
-                    "I'll keep looking — try again! 🏡"
-                )
-
-            with st.chat_message("assistant"):
-                st.markdown(ai_resp)
-
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": ai_resp
-            })
+                st.session_state.messages.append({
+                    "role":    "assistant",
+                    "content": response,
+                    "props":   results or None,
+                })
 
 
 if __name__ == "__main__":

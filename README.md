@@ -1,69 +1,111 @@
-# Real Estate Agent Application
+# Real Estate AI Assistant 🏠
 
-## Overview
-This project is a real estate agent application built using Python. It includes functionality for managing real estate data and interacting with a database. The application uses Streamlit for the user interface.
+An intelligent real estate consultation application powered by LLMs (via OpenRouter) and vector search (FAISS/ChromaDB). This project provides a conversational interface for searching property listings, analyzing market trends, and receiving professional real estate advice.
 
-## Project Structure
-```
+## ✨ Features
+
+- **Hybrid Search**: Combines semantic vector search with structured filtering (price, bedrooms, bathrooms, location).
+- **Intent Classification**: Automatically detects if a user is searching for properties, asking a general real estate question, or just greeting the assistant.
+- **Intelligent Parameter Extraction**: Extracts specific search criteria directly from natural language queries.
+- **Interactive UI**: Built with Streamlit, featuring styled property cards, intent badges, and a professional chat interface.
+- **Multiple Implementations**:
+    - **Standard (FAISS)**: Advanced indexing with derived features (price per sqft, property scores) and stratified sampling.
+    - **ChromaDB**: Alternative vector database implementation.
+    - **Simple Chat**: A lightweight template for direct LLM interaction.
+
+## 🏗️ Project Structure
+
+```text
 real_estate-agent/
-├── app.py                  # Main entry point for the application
-├── requirements.txt        # Python dependencies
-├── chromadbgpt/            # Contains application logic
-│   ├── app_simple.py       # Simplified app logic
-│   ├── app.py              # Main app logic
-│   ├── load_data_simple.py # Simplified data loading
-│   └── load_data.py        # Data loading logic
-├── data/                   # Contains data files
-│   └── realtor-data.csv    # Sample real estate data
-├── real_estate_chroma_db/  # Database files
-│   ├── chroma.sqlite3      # SQLite database
-│   └── ...                 # Additional database files
-├── tests/                  # Test files
-│   └── __pycache__/        # Cached test files
+├── app.py                  # Simple OpenRouter Chat (Template)
+├── faissindexgpt/          # Main FAISS-based Application
+│   ├── app_faiss.py        # Streamlit app with advanced metrics
+│   └── load_faiss.py       # Data processing and FAISS index creation
+├── chromadbgpt/            # ChromaDB & FAISS Hybrid Application
+│   ├── app.py              # Streamlit app with hybrid searcher
+│   └── load_data.py        # ChromaDB data loading script
+├── data/                   # Raw data files
+│   └── realtor-data.csv    # Sample real estate dataset
+├── real_estate_faiss_index/# Generated FAISS index & metadata
+├── real_estate_chroma_db/  # Generated ChromaDB database
+├── tests/                  # Unit and integration tests
+└── requirements.txt        # Python dependencies
 ```
 
-## Prerequisites
-- Python 3.12
-- Conda environment (optional)
+## 🚀 Getting Started
 
-## Installation
-1. Clone the repository:
+### Prerequisites
+
+- Python 3.12
+- [OpenRouter API Key](https://openrouter.ai/keys)
+
+### Installation
+
+1. **Clone the repository**:
    ```bash
    git clone <repository-url>
    cd real_estate-agent
    ```
 
-2. Create and activate a virtual environment (optional):
-   ```bash
-   conda create -n agent python=3.12
-   conda activate agent
+2. **Set up environment**:
+   Create a `.env` file in the root directory:
+   ```env
+   API_KEY=your_openrouter_api_key_here
    ```
 
-3. Install dependencies:
+3. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
 
-## Usage
-To run the application, use the following command:
+### 📊 Data Preparation
+
+Before running the apps, you need to initialize the vector indices.
+
+**For FAISS (Recommended):**
+```bash
+python faissindexgpt/load_faiss.py --csv data/realtor-data.csv --sample 1000 --sample-method random
+```
+
+**For ChromaDB:**
+```bash
+python chromadbgpt/load_data.py --csv data/realtor-data.csv --sample 1000
+```
+
+## 💻 Usage
+
+Run the Streamlit applications using the following commands:
+
+**Advanced FAISS Assistant (Highest Performance):**
+```bash
+streamlit run faissindexgpt/app_faiss.py
+```
+
+**Standard Hybrid Assistant:**
 ```bash
 streamlit run chromadbgpt/app.py
 ```
 
-## Data
-The `data/realtor-data.csv` file contains sample real estate data used by the application. You can replace this file with your own data.
-
-## Database
-The application uses an SQLite database located in the `real_estate_chroma_db/` directory. Ensure the database files are present before running the application.
-
-## Testing
-Tests are located in the `tests/` directory. To run the tests, use:
+**Simple Chat Template:**
 ```bash
-pytest
+streamlit run app.py
 ```
 
-## Contributing
-Feel free to submit issues or pull requests if you have suggestions or improvements.
+## 🔍 Examples to Try
 
-## License
-This project is licensed under the MIT License. See the LICENSE file for details.
+- "Show me 3-bedroom homes in Austin under $500,000"
+- "What are the most expensive properties in Dallas?"
+- "What is a mortgage pre-approval?"
+- "Compare the benefits of a condo vs a single-family home."
+
+## 🛠️ Tech Stack
+
+- **Language**: Python 3.12
+- **UI Framework**: Streamlit
+- **LLM API**: OpenRouter (GPT-4o, GPT-4o-mini, etc.)
+- **Vector Search**: FAISS, ChromaDB
+- **Data Handling**: Pandas, NumPy, Scikit-learn
+
+## 📄 License
+
+This project is licensed under the MIT License.
